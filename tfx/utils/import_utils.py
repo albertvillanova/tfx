@@ -19,8 +19,10 @@ from __future__ import division
 from __future__ import print_function
 
 import importlib
-import sys
+import types
 from typing import Any, Callable, Text, Type
+
+import six
 
 from tfx.utils import io_utils
 
@@ -48,16 +50,22 @@ def import_func_from_source(source_path: Text, fn_name: Text) -> Callable:  # py
   source_path = io_utils.ensure_local(source_path)
 
   try:
-    loader = importlib.machinery.SourceFileLoader(
-        fullname='user_module',
-        path=source_path,
-    )
-    spec = importlib.util.spec_from_loader(
-        loader.name, loader, origin=source_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[loader.name] = module
-    loader.exec_module(module)
-    return getattr(module, fn_name)
+    if six.PY2:
+      import imp  # pylint: disable=g-import-not-at-top
+      try:
+        user_module = imp.load_source('user_module', source_path)
+        return getattr(user_module, fn_name)
+      except IOError:
+        raise
+
+    else:
+      loader = importlib.machinery.SourceFileLoader(
+          fullname='user_module',
+          path=source_path,
+      )
+      user_module = types.ModuleType(loader.name)
+      loader.exec_module(user_module)
+      return getattr(user_module, fn_name)
 
   except IOError:
     raise ImportError('{} in {} not found in import_func_from_source()'.format(

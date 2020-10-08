@@ -17,7 +17,6 @@ from tfx.orchestration.portable import outputs_utils
 from tfx.orchestration.portable import test_utils
 from tfx.proto.orchestration import execution_result_pb2
 from tfx.proto.orchestration import pipeline_pb2
-from tfx.types.value_artifact import ValueArtifact
 
 from google.protobuf import text_format
 
@@ -53,17 +52,6 @@ _PIPLINE_NODE = text_format.Parse(
         }
       }
     }
-   outputs {
-      key: "output_3"
-      value {
-        artifact_spec {
-          type {
-            id: 3
-            name: "String"
-          }
-        }
-      }
-    }
   }
 """, pipeline_pb2.PipelineNode())
 
@@ -86,10 +74,8 @@ class OutputUtilsTest(test_utils.TfxTest):
     output_artifacts = self._output_resolver.generate_output_artifacts(1)
     self.assertIn('output_1', output_artifacts)
     self.assertIn('output_2', output_artifacts)
-    self.assertIn('output_3', output_artifacts)
     self.assertLen(output_artifacts['output_1'], 1)
     self.assertLen(output_artifacts['output_2'], 1)
-    self.assertLen(output_artifacts['output_3'], 1)
 
     artifact_1 = output_artifacts['output_1'][0]
     self.assertRegex(artifact_1.uri, '.*/test_node/execution_1/output_1')
@@ -110,17 +96,6 @@ class OutputUtilsTest(test_utils.TfxTest):
         id: 2
         name: "test_type_2"
         """, artifact_2.artifact_type)
-
-    artifact_3 = output_artifacts['output_3'][0]
-    self.assertRegex(artifact_3.uri,
-                     '.*/test_node/execution_1/output_3/value')
-    self.assertRegex(artifact_3.name,
-                     'test_pipeline:test_run_0:test_node:output_3:0')
-    self.assertProtoEquals(
-        """
-        id: 3
-        name: "String"
-        """, artifact_3.artifact_type)
 
   def testGetExecutorOutputUri(self):
     executor_output_uri = self._output_resolver.get_executor_output_uri(1)
@@ -149,10 +124,6 @@ class OutputUtilsTest(test_utils.TfxTest):
     outputs_utils.make_output_dirs(output_artifacts)
     for _, artifact_list in output_artifacts.items():
       for artifact in artifact_list:
-        if isinstance(artifact, ValueArtifact):
-          self.assertFalse(tf.io.gfile.isdir(artifact.uri))
-        else:
-          self.assertTrue(tf.io.gfile.isdir(artifact.uri))
         self.assertTrue(tf.io.gfile.exists(artifact.uri))
 
     outputs_utils.remove_output_dirs(output_artifacts)

@@ -15,6 +15,7 @@
 import os
 from typing import Optional
 
+import mock
 import tensorflow as tf
 from tfx.dsl.compiler import constants
 from tfx.orchestration import metadata
@@ -115,7 +116,7 @@ _conponent_to_pipeline_run = {}
 # TODO(b/162980675): When PythonExecutorOperator is implemented. We don't
 # Need to Fake the whole FakeComponentAsDoFn. Instead, just fake or mock
 # executors.
-class _FakeComponentAsDoFn(beam_dag_runner.PipelineNodeAsDoFn):
+class _FakeComponentAsDoFn(beam_dag_runner._PipelineNodeAsDoFn):
 
   def __init__(self,
                pipeline_node: pipeline_pb2.PipelineNode,
@@ -146,15 +147,18 @@ class BeamDagRunnerTest(test_utils.TfxTest):
     self.load_proto_from_text(
         os.path.join(
             os.path.dirname(__file__), 'testdata',
-            'pipeline_for_beam_dag_runner_test.pbtxt'), self._pipeline)
+            'pipeline_for_launcher_test.pbtxt'), self._pipeline)
     _executed_components.clear()
     _component_executors.clear()
     _component_drivers.clear()
     _conponent_to_pipeline_run.clear()
 
+  @mock.patch.multiple(
+      beam_dag_runner,
+      _PipelineNodeAsDoFn=_FakeComponentAsDoFn,
+  )
   def testRunWithLocalDeploymentConfig(self):
     self._pipeline.deployment_config.Pack(_INTERMEDIATE_DEPLOYMENT_CONFIG)
-    beam_dag_runner.BeamDagRunner._PIPELINE_NODE_DO_FN_CLS = _FakeComponentAsDoFn
     beam_dag_runner.BeamDagRunner().run(self._pipeline)
     self.assertEqual(
         _component_executors, {
@@ -190,9 +194,12 @@ class BeamDagRunnerTest(test_utils.TfxTest):
     # Verifies that every component gets a not-None pipeline_run.
     self.assertTrue(all(_conponent_to_pipeline_run.values()))
 
+  @mock.patch.multiple(
+      beam_dag_runner,
+      _PipelineNodeAsDoFn=_FakeComponentAsDoFn,
+  )
   def testRunWithIntermediateDeploymentConfig(self):
     self._pipeline.deployment_config.Pack(_LOCAL_DEPLOYMENT_CONFIG)
-    beam_dag_runner.BeamDagRunner._PIPELINE_NODE_DO_FN_CLS = _FakeComponentAsDoFn
     beam_dag_runner.BeamDagRunner().run(self._pipeline)
     self.assertEqual(
         _component_executors, {

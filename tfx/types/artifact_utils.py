@@ -249,6 +249,5 @@ def deserialize_artifact(
   # Get the artifact's class and construct the Artifact object.
   artifact_cls = get_artifact_type_class(artifact_type)
   result = artifact_cls()
-  result.artifact_type.CopyFrom(artifact_type)
-  result.set_mlmd_artifact(artifact or metadata_store_pb2.Artifact())
+  result.set_mlmd_artifact(artifact)
   return result

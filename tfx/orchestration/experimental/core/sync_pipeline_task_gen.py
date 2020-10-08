@@ -76,7 +76,7 @@ class SyncPipelineTaskGenerator(task_gen.TaskGenerator):
             lambda node: [self._node_map[n] for n in node.upstream_nodes]),
         get_child_nodes=(
             lambda node: [self._node_map[n] for n in node.downstream_nodes]))
-    result = []
+    tasks = []
     with self._mlmd_connection as m:
       # TODO(goutham): Cache executions and/or use TaskQueue so that we don't
       # have to make MLMD queries for upstream nodes in each iteration.
@@ -95,12 +95,12 @@ class SyncPipelineTaskGenerator(task_gen.TaskGenerator):
           if self._upstream_nodes_executed(m, node):
             task = self._generate_task(m, node)
             if task:
-              result.append(task)
+              tasks.append(task)
         # If there are no executed nodes in the current layer, downstream nodes
         # need not be checked.
         if not executed_nodes:
           break
-    return result
+    return tasks
 
   def _generate_task(
       self, metadata_handler: metadata.Metadata,
@@ -120,10 +120,10 @@ class SyncPipelineTaskGenerator(task_gen.TaskGenerator):
       return None
 
     executions = task_gen_utils.get_executions(metadata_handler, node)
-    result = task_gen_utils.generate_task_from_active_execution(
+    task = task_gen_utils.generate_task_from_active_execution(
         self._pipeline, node, executions)
-    if result:
-      return result
+    if task:
+      return task
 
     resolved_info = task_gen_utils.generate_resolved_info(
         metadata_handler, node)

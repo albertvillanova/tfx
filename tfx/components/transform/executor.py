@@ -34,6 +34,7 @@ from tensorflow_transform import impl_helper
 import tensorflow_transform.beam as tft_beam
 from tensorflow_transform.beam import analyzer_cache
 from tensorflow_transform.beam import common as tft_beam_common
+from tensorflow_transform.saved import saved_transform_io
 from tensorflow_transform.tf_metadata import dataset_metadata
 from tensorflow_transform.tf_metadata import dataset_schema
 from tensorflow_transform.tf_metadata import metadata_io
@@ -412,8 +413,6 @@ class Executor(base_executor.BaseExecutor):
             exec_properties.get('preprocessing_fn', None),
         labels.CUSTOM_CONFIG:
             exec_properties.get('custom_config', None),
-        labels.FORCE_TF_COMPAT_V1_LABEL:
-            True,
     }
     cache_input = _GetCachePath(ANALYZER_CACHE_KEY, input_dict)
     if cache_input is not None:
@@ -671,8 +670,7 @@ class Executor(base_executor.BaseExecutor):
                  analyze_data_list: List[_Dataset],
                  typespecs: Mapping[Text, tf.TypeSpec],
                  preprocessing_fn: Any,
-                 cache_source: beam.PTransform,
-                 force_tf_compat_v1: bool):
+                 cache_source: beam.PTransform):
       # pyformat: enable
       self._input_cache_dir = input_cache_dir
       self._output_cache_dir = output_cache_dir
@@ -680,7 +678,6 @@ class Executor(base_executor.BaseExecutor):
       self._feature_spec_or_typespec = typespecs
       self._preprocessing_fn = preprocessing_fn
       self._cache_source = cache_source
-      self._force_tf_compat_v1 = force_tf_compat_v1
 
     # TODO(zoy): Remove this method once beam no longer pickles PTransforms,
     # once https://issues.apache.org/jira/browse/BEAM-3812 is resolved.
@@ -703,7 +700,7 @@ class Executor(base_executor.BaseExecutor):
       cache_entry_keys = (
           tft_beam.analysis_graph_builder.get_analysis_cache_entry_keys(
               self._preprocessing_fn, self._feature_spec_or_typespec,
-              dataset_keys_list, self._force_tf_compat_v1))
+              dataset_keys_list))
       # We estimate the number of stages in the pipeline to be roughly:
       # analyzers * analysis_paths * 10.
       if (len(cache_entry_keys) * len(dataset_keys_list) * 10 >
@@ -741,7 +738,7 @@ class Executor(base_executor.BaseExecutor):
         filtered_analysis_dataset_keys = (
             tft_beam.analysis_graph_builder.get_analysis_dataset_keys(
                 self._preprocessing_fn, self._feature_spec_or_typespec,
-                dataset_keys_list, input_cache, self._force_tf_compat_v1))
+                dataset_keys_list, input_cache))
 
       new_analyze_data_dict = {}
       for dataset in self._analyze_data_list:
@@ -833,8 +830,6 @@ class Executor(base_executor.BaseExecutor):
           preprocessing_fn, optional.
         - labels.DATA_VIEW_LABEL: DataView to be used to read the Example,
           optional
-        - labels.FORCE_TF_COMPAT_V1_LABEL: Whether to use TF in compat.v1 mode
-          irrespective of installed/enabled TF behaviors.
       outputs: A dictionary of labelled output values, including:
         - labels.PER_SET_STATS_OUTPUT_PATHS_LABEL: Paths to statistics output,
           optional.
@@ -883,10 +878,7 @@ class Executor(base_executor.BaseExecutor):
     temp_path = value_utils.GetSoleValue(outputs, labels.TEMP_OUTPUT_LABEL)
     data_view_uri = value_utils.GetSoleValue(
         inputs, labels.DATA_VIEW_LABEL, strict=False)
-    force_tf_compat_v1 = value_utils.GetSoleValue(
-        inputs, labels.FORCE_TF_COMPAT_V1_LABEL)
 
-    absl.logging.debug('Force tf.compat.v1: %s', force_tf_compat_v1)
     absl.logging.debug('Analyze data patterns: %s',
                        list(enumerate(analyze_data_paths)))
     absl.logging.debug('Transform data patterns: %s',
@@ -934,7 +926,7 @@ class Executor(base_executor.BaseExecutor):
     # Inspecting the preprocessing_fn even if we know we need a full pass in
     # order to fail faster if it fails.
     analyze_input_columns = tft.get_analyze_input_columns(
-        preprocessing_fn, typespecs, force_tf_compat_v1=force_tf_compat_v1)
+        preprocessing_fn, typespecs)
 
     if not compute_statistics and not materialize_output_paths:
       if analyze_input_columns:
@@ -947,16 +939,15 @@ class Executor(base_executor.BaseExecutor):
             'Using the in-place Transform since compute_statistics=False, '
             'it does not materialize transformed data, and the configured '
             'preprocessing_fn appears to not require analyzing the data.')
-        self._RunInPlaceImpl(preprocessing_fn, force_tf_compat_v1,
-                             input_dataset_metadata, typespecs,
-                             transform_output_path)
+        self._RunInPlaceImpl(preprocessing_fn, input_dataset_metadata,
+                             typespecs, transform_output_path)
         # TODO(b/122478841): Writes status to status file.
         return
 
     materialization_format = (
         transform_paths_file_formats[-1] if materialize_output_paths else None)
-    self._RunBeamImpl(analyze_data_list, transform_data_list, preprocessing_fn,
-                      force_tf_compat_v1, input_dataset_metadata,
+    self._RunBeamImpl(analyze_data_list, transform_data_list,
+                      preprocessing_fn, input_dataset_metadata,
                       transform_output_path, raw_examples_data_format,
                       temp_path, input_cache_dir, output_cache_dir,
                       compute_statistics, per_set_stats_output_paths,
@@ -965,7 +956,6 @@ class Executor(base_executor.BaseExecutor):
 
   def _RunBeamImpl(self, analyze_data_list: List[_Dataset],
                    transform_data_list: List[_Dataset], preprocessing_fn: Any,
-                   force_tf_compat_v1: bool,
                    input_dataset_metadata: dataset_metadata.DatasetMetadata,
                    transform_output_path: Text, raw_examples_data_format: int,
                    temp_path: Text, input_cache_dir: Optional[Text],
@@ -979,8 +969,6 @@ class Executor(base_executor.BaseExecutor):
       analyze_data_list: List of datasets for analysis.
       transform_data_list: List of datasets for transform.
       preprocessing_fn: The tf.Transform preprocessing_fn.
-      force_tf_compat_v1: If True, call Transform's API to use Tensorflow in
-        tf.compat.v1 mode.
       input_dataset_metadata: A DatasetMetadata object for the input data.
       transform_output_path: An absolute path to write the output to.
       raw_examples_data_format: The data format of the raw examples. One of the
@@ -1004,14 +992,9 @@ class Executor(base_executor.BaseExecutor):
         analyze_data_list[0].tfxio.TensorAdapter().OriginalTypeSpecs())
 
     analyze_input_columns = tft.get_analyze_input_columns(
-        preprocessing_fn,
-        unprojected_typespecs,
-        force_tf_compat_v1=force_tf_compat_v1)
-
+        preprocessing_fn, unprojected_typespecs)
     transform_input_columns = tft.get_transform_input_columns(
-        preprocessing_fn,
-        unprojected_typespecs,
-        force_tf_compat_v1=force_tf_compat_v1)
+        preprocessing_fn, unprojected_typespecs)
     # Use the same dataset (same columns) for AnalyzeDataset and computing
     # pre-transform stats so that the data will only be read once for these
     # two operations.
@@ -1037,8 +1020,7 @@ class Executor(base_executor.BaseExecutor):
           desired_batch_size=desired_batch_size,
           passthrough_keys=self._GetTFXIOPassthroughKeys(),
           use_deep_copy_optimization=True,
-          use_tfxio=True,
-          force_tf_compat_v1=force_tf_compat_v1):
+          use_tfxio=True):
         # pylint: disable=expression-not-assigned
         # pylint: disable=no-value-for-parameter
         _ = (
@@ -1050,9 +1032,9 @@ class Executor(base_executor.BaseExecutor):
         (new_analyze_data_dict, input_cache) = (
             pipeline
             | 'OptimizeRun' >> self._OptimizeRun(
-                input_cache_dir, output_cache_dir,
-                analyze_data_list, unprojected_typespecs, preprocessing_fn,
-                self._GetCacheSource(), force_tf_compat_v1))
+                input_cache_dir, output_cache_dir, analyze_data_list,
+                unprojected_typespecs, preprocessing_fn,
+                self._GetCacheSource()))
 
         if input_cache:
           absl.logging.debug('Analyzing data with cache.')
@@ -1248,16 +1230,15 @@ class Executor(base_executor.BaseExecutor):
 
     return _Status.OK()
 
-  def _RunInPlaceImpl(self, preprocessing_fn: Any, force_tf_compat_v1: bool,
-                      metadata: dataset_metadata.DatasetMetadata,
-                      typespecs: Dict[Text, tf.TypeSpec],
-                      transform_output_path: Text) -> _Status:
+  def _RunInPlaceImpl(
+      self, preprocessing_fn: Any,
+      metadata: dataset_metadata.DatasetMetadata,
+      typespecs: Dict[Text, tf.TypeSpec],
+      transform_output_path: Text) -> _Status:
     """Runs a transformation iteration in-place without looking at the data.
 
     Args:
       preprocessing_fn: The tf.Transform preprocessing_fn.
-      force_tf_compat_v1: If True, call Transform's API to use Tensorflow in
-        tf.compat.v1 mode.
       metadata: A DatasetMetadata object for the input data.
       typespecs: a Dict[Text, tf.TypeSpec]
       transform_output_path: An absolute path to write the output to.
@@ -1271,12 +1252,39 @@ class Executor(base_executor.BaseExecutor):
     raw_metadata_dir = os.path.join(transform_output_path,
                                     tft.TFTransformOutput.RAW_METADATA_DIR)
     metadata_io.write_metadata(metadata, raw_metadata_dir)
-    # TODO(b/149997088): Use typespecs for the tf.compat.v1 path as well.
-    feature_specs = schema_utils.schema_as_feature_spec(
-        _GetSchemaProto(metadata)).feature_spec
-    impl_helper.analyze_in_place(preprocessing_fn, force_tf_compat_v1,
-                                 feature_specs, typespecs,
-                                 transform_output_path)
+
+    with tf.compat.v1.Graph().as_default() as graph:
+      with tf.compat.v1.Session(graph=graph) as sess:
+
+        input_signature = impl_helper.batched_placeholders_from_specs(
+            schema_utils.schema_as_feature_spec(
+                _GetSchemaProto(metadata)).feature_spec)
+
+        # In order to avoid a bug where import_graph_def fails when the
+        # input_map and return_elements of an imported graph are the same
+        # (b/34288791), we avoid using the placeholder of an input column as an
+        # output of a graph. We do this by applying tf.identity to all inputs of
+        # the preprocessing_fn.  Note this applies at the level of raw tensors.
+        # TODO(b/34288791): Remove this workaround and use a shallow copy of
+        # inputs instead.  A shallow copy is needed in case
+        # self._preprocessing_fn mutates its input.
+        copied_inputs = impl_helper.copy_tensors(input_signature)
+
+        output_signature = preprocessing_fn(copied_inputs)
+        sess.run(tf.compat.v1.global_variables_initializer())
+        sess.run(tf.compat.v1.tables_initializer())
+        transform_fn_path = os.path.join(transform_output_path,
+                                         tft.TFTransformOutput.TRANSFORM_FN_DIR)
+        saved_transform_io.write_saved_transform_from_session(
+            sess, input_signature, output_signature, transform_fn_path)
+
+        transformed_metadata = dataset_metadata.DatasetMetadata(
+            schema=tft.schema_inference.infer_feature_schema(
+                output_signature, graph, sess))
+
+    transformed_metadata_dir = os.path.join(
+        transform_output_path, tft.TFTransformOutput.TRANSFORMED_METADATA_DIR)
+    metadata_io.write_metadata(transformed_metadata, transformed_metadata_dir)
 
     return _Status.OK()
 

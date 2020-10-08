@@ -32,36 +32,6 @@
 
 ## Documentation updates
 
-# Version 0.24.1
-
-## Major Features and Improvements
-
-*   N/A
-
-## Bug fixes and other changes
-
-*   Fixes issues where custom property access of a missing property created an invalid MLMD Artifact protobuf message.
-
-### Deprecations
-
-*   N/A
-
-## Breaking changes
-
-*   N/A
-
-### For pipeline authors
-
-*   N/A
-
-### For component authors
-
-*   N/A
-
-## Documentation updates
-
-*   N/A
-
 # Version 0.24.0
 
 ## Major Features and Improvements
@@ -277,36 +247,6 @@
     to use `input_base` ASAP.
 *   Note: We plan to remove Python 3.5 support after this release.
 
-# Version 0.22.2
-
-## Major Features and Improvements
-
-*   N/A
-
-## Bug fixes and other changes
-
-*   Reuse Examples artifact type introduced in TFX 0.23 to allow older release jobs running together with TFX 0.23+ release.
-
-### Deprecations
-
-*   N/A
-
-## Breaking changes
-
-*   N/A
-
-### For pipeline authors
-
-*   N/A
-
-### For component authors
-
-*   N/A
-
-## Documentation updates
-
-*   N/A
-
 # Version 0.22.1
 
 ## Major Features and Improvements
@@ -417,37 +357,6 @@
 
 ## Deprecations
 *   Deprecating Py2 support
-
-# Version 0.21.5
-
-## Major Features and Improvements
-
-*   N/A
-
-## Bug fixes and other changes
-
-*   Reuse Examples artifact type introduced in TFX 0.23 to allow older release jobs running together with TFX 0.23+ release.
-*   Removed python-snappy from [all] extra dependency list.
-
-### Deprecations
-
-*   N/A
-
-## Breaking changes
-
-*   N/A
-
-### For pipeline authors
-
-*   N/A
-
-### For component authors
-
-*   N/A
-
-## Documentation updates
-
-*   N/A
 
 # Version 0.21.4
 
